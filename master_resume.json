@@ -1,0 +1,36 @@
+{
+  "name": "Keshav Karn",
+  "contact": {
+    "email": "keshavkarn1976@gmail.com",
+    "phone": "+91-XXXXXXXXXX"
+  },
+  "summary": "Senior Software Developer / Tech Lead with 14+ years experience in React, GraphQL, Drupal, SSO.",
+  "skills": [
+    "React",
+    "Redux",
+    "GraphQL",
+    "TypeScript",
+    "JavaScript",
+    "Node.js",
+    "Playwright",
+    "Selenium",
+    "CI/CD",
+    "AWS",
+    "Docker",
+    "Kubernetes",
+    "SSO",
+    "Salesforce"
+  ],
+  "experience": [
+    {
+      "company": "ExampleCorp",
+      "title": "Senior Software Developer",
+      "period": "2018-2025",
+      "bullets": [
+        "Led front-end development using React and TypeScript for multiple high-traffic apps.",
+        "Integrated SSO and OAuth flows across internal portals.",
+        "Built CI/CD pipelines and containerized services using Docker and Kubernetes."
+      ]
+    }
+  ]
+}
