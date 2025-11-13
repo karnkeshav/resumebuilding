@@ -1,12 +1,11 @@
 name: JobBot scheduled run
 
-# ensure the workflow has write permission to push files
 permissions:
   contents: write
 
 on:
   schedule:
-    - cron: '0 */6 * * *'   # every 6 hours — change as needed
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
@@ -25,13 +24,19 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies (safe for GitHub Actions without lockfile)
+      - name: Install dependencies
         run: npm install --no-audit --no-fund
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
-      - name: Run jobbot
+      - name: Build jobs.txt from alerts (JSON/CSV)
+        run: node src/alerts-reader.js
+
+      - name: Expand search->links (discover job view URLs)
+        run: node src/fetch-links.js
+
+      - name: Run jobbot (scrape, tailor draft, commit, notify)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
