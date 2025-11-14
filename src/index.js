@@ -105,7 +105,7 @@ async function processJobUrl(url, resume) {
   const location = job.location || 'N/A';
 
   // send initial 'processing' notification (optional)
-  await safeSendTelegram(`📄 Processing job — *${title}* @ *${company}*\nLocation: ${location}\nJob URL: ${url}`);
+  // await safeSendTelegram(`📄 Processing job — *${title}* @ *${company}*\nLocation: ${location}\nJob URL: ${url}`);
 
   let match;
   try { match = matchKeywords(job.description || '', resume || {}); }
