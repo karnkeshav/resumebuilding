@@ -1,0 +1,43 @@
+name: Telegram Poller
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # runs every 5 min
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Deps
+        run: npm install
+
+      - name: Run Telegram poller
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node src/bot-handler.js
+
+      - name: Commit and Push State (if changed)
+        run: |
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Poller: update state"
+            git push
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
