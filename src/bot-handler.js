@@ -17,7 +17,6 @@ const JOBS_FILE = path.resolve('jobs.txt');
 const OUTBOX_DIR = path.resolve('outbox');
 
 const ALLOWED_CHAT = process.env.TELEGRAM_CHAT_ID ? String(process.env.TELEGRAM_CHAT_ID) : null;
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || null;
 
 if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true });
 if (!fs.existsSync(OUTBOX_DIR)) fs.mkdirSync(OUTBOX_DIR, { recursive: true });
@@ -34,7 +33,6 @@ function loadSelected() {
 function saveSelected(obj) { fs.writeFileSync(SELECTED_FILE, JSON.stringify(obj, null, 2), 'utf8'); }
 
 function gitCommitPush(files, msg) {
-  // safe wrapper - will not crash pipeline if git push fails
   try {
     execSync('git config user.email "jobbot@users.noreply.github.com"');
     execSync('git config user.name "jobbot[bot]"');
@@ -42,7 +40,7 @@ function gitCommitPush(files, msg) {
     execSync('git diff --staged --quiet || git commit -m "' + msg.replace(/"/g, '\\"') + '"', { stdio: 'inherit' });
     execSync('git push', { stdio: 'inherit' });
   } catch (e) {
-    console.error('gitCommitPush failed:', e && e.message ? e.message : e);
+    console.error('gitCommitPush failed (non-fatal):', e && e.message ? e.message : e);
   }
 }
 
@@ -52,7 +50,7 @@ function pushSelection(entry) {
   if (!state.pending.find(p => p.id === entry.id || p.file === entry.file)) {
     state.pending.push(entry);
     saveSelected(state);
-    // commit state so it persists
+    // commit state to persist selection
     gitCommitPush(['state/selected.json'], `JobBot: queue ${entry.id}`);
     return true;
   }
@@ -105,17 +103,15 @@ async function handleCallback(q) {
       await answerCallbackQuery(id, added ? 'Queued for tailoring ✅' : 'Already queued');
       if (message.chat && message.message_id) await editMessageReplyMarkup(message.chat.id, message.message_id);
       await sendTelegram(`Queued *${file}* for resume tailoring.`);
-      // resume-builder workflow will be triggered by the commit above (see resume-builder.yml)
+      // resume-builder workflow will run on push of state/selected.json
     } else if (action === 'SKIP' || action === 'REJECT') {
-      // delete outbox file and remove from queue
       const outpath = path.join(OUTBOX_DIR, file);
       let deleted = false;
       if (fs.existsSync(outpath)) {
         try { fs.unlinkSync(outpath); deleted = true; } catch(e){ console.error('unlink failed', e); }
       }
       removeSelectionById(file);
-      // commit outbox deletion (and selected.json change already committed by removeSelection)
-      gitCommitPush([`outbox/${file}`], `JobBot: delete outbox ${file}`);
+      gitCommitPush([`outbox/${file}`, 'state/selected.json'], `JobBot: delete outbox ${file}`);
       await answerCallbackQuery(id, deleted ? 'Skipped and deleted ✅' : 'Skipped');
       if (message.chat && message.message_id) await editMessageReplyMarkup(message.chat.id, message.message_id);
       await sendTelegram(deleted ? `Skipped and deleted *${file}* from outbox.` : `Skipped *${file}*.`);
@@ -129,7 +125,7 @@ async function handleCallback(q) {
 
 async function handleMessage(msg) {
   if (!msg || !msg.text) return;
-  if (ALLOWED_CHAT && String(msg.chat && msg.chat.id) !== ALLOWED_CHAT) return; // only your chat
+  if (ALLOWED_CHAT && String(msg.chat && msg.chat.id) !== ALLOWED_CHAT) return;
 
   const txt = msg.text.trim();
   const parts = txt.split(/\s+/);
@@ -145,14 +141,12 @@ async function handleMessage(msg) {
     } else if (cmd === 'SKIP' || cmd === 'REJECT') {
       const file = normaliseFileArg(rest);
       if (!file) { await sendTelegram('Please provide filename to skip.'); return; }
-      // delete file
       const outpath = path.join(OUTBOX_DIR, file);
       let deleted = false;
       if (fs.existsSync(outpath)) {
         try { fs.unlinkSync(outpath); deleted = true; } catch(e){ console.error('unlink failed', e); }
       }
       const removed = removeSelectionById(file);
-      // commit deletion and removal
       gitCommitPush([`outbox/${file}`, 'state/selected.json'], `JobBot: skipped ${file}`);
       await sendTelegram(deleted ? `Skipped and deleted *${file}*` : `${file} not found but removed from queue.`);
     } else if (cmd === 'ADD') {
@@ -173,13 +167,12 @@ async function handleMessage(msg) {
       buttons.push([{ text: 'Email Recruiter', url: `mailto:?subject=${subject}&body=${body}` }]);
       await sendTelegram(`Apply options for *${file}*`, buttons);
     } else if (cmd === 'YES' || cmd === 'NO') {
-      // response to 12h prompt. store as small file state/prompt-response.txt
       fs.writeFileSync(path.join(STATE_DIR, 'last_12h_response.txt'), `${cmd}|${Date.now()}`, 'utf8');
-      await sendTelegram(cmd === 'YES' ? 'Okay — send me the titles (one per line) via ADD <title, location>.' : 'Understood. Will ask again in 12 hours.');
+      await sendTelegram(cmd === 'YES' ? 'Okay — send me new titles via ADD <title, location>.' : 'Understood. I will ask again in 12 hours.');
     } else if (cmd === '/HELP' || cmd === 'HELP') {
       await sendTelegram('Commands: APPROVE|BUILD <file>, SKIP <file>, ADD <Title, Location>, APPLY <file>, YES, NO');
     } else {
-      // ignore other casual messages to avoid spam; only respond if user explicitly asks help
+      // ignore other casual messages to avoid spam
       return;
     }
   } catch (e) {
@@ -195,7 +188,6 @@ async function pollOnce() {
   for (const u of res.result) {
     if (u.update_id > max) max = u.update_id;
     if (u.callback_query) {
-      // reply to callback
       await handleCallback(u.callback_query);
     } else if (u.message) {
       await handleMessage(u.message);
