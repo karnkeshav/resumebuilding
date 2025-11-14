@@ -2,7 +2,7 @@ name: Job Scraper
 
 on:
   schedule:
-    - cron: "0 * * * *"   # runs every 1 hour (at minute 0 of every hour) — UTC
+    - cron: "0 * * * *"   # runs at minute 0 every hour (UTC)
   workflow_dispatch:      # manual trigger
 
 jobs:
@@ -21,18 +21,18 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      ###########################################################
-      # 🔥 RESTORE LINKEDIN COOKIES FROM GITHUB SECRET
-      ###########################################################
+      # Restore LinkedIn cookies if secret available
       - name: Restore LinkedIn cookies
-        if: ${{ secrets.LINKEDIN_COOKIES != '' }}
+        env:
+          LINKEDIN_COOKIES: ${{ secrets.LINKEDIN_COOKIES }}
         run: |
-          echo "${{ secrets.LINKEDIN_COOKIES }}" | base64 --decode > cookies.json
-          echo "cookies.json restored successfully."
+          if [ -z "${LINKEDIN_COOKIES}" ]; then
+            echo "LINKEDIN_COOKIES secret not set — continuing without cookies."
+          else
+            echo "${LINKEDIN_COOKIES}" | base64 --decode > cookies.json
+            echo "cookies.json restored successfully."
+          fi
 
-      ###########################################################
-      # 🔥 RUN SCRAPER
-      ###########################################################
       - name: Run job scraper
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -42,14 +42,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node src/index.js
 
-      ###########################################################
-      # 🔥 COMMIT updated job state (e.g., jobs.txt updates)
-      ###########################################################
       - name: Commit job state updates
         run: |
           git config --local user.email "jobbot@users.noreply.github.com"
           git config --local user.name "jobbot[bot]"
-
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "Poller: update state"
