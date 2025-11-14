@@ -1,84 +1,167 @@
 // full-file: src/index.js
+// Optimized coordinator for JobBot: builds jobs.txt if missing, scrapes jobs (Playwright),
+// matches with master_resume.json, writes drafts to outbox/, commits via git-helper, and notifies via Telegram.
+// Concurrency controlled for speed; robust fallbacks and safe Telegram sends.
+
 const fs = require('fs');
 const path = require('path');
-const { fetchJob } = require('./playwright');
-const { matchKeywords } = require('./keywords');
-const { commitOutbox } = require('./git-helper');
-const { sendTelegram } = require('./telegram');
+const { execSync } = require('child_process');
+
+const { fetchJob } = require('./playwright'); // returns { title, company, location, description }
+const { matchKeywords } = require('./keywords'); // returns { score, matched, partial, missing, matchedBullets }
+const { commitOutbox } = require('./git-helper'); // returns public URL string for committed file (or null)
+const { sendTelegram } = require('./telegram'); // async function to send msg
 
 const JOBS_FILE = path.resolve('jobs.txt');
 const RESUME_FILE = path.resolve('master_resume.json');
 const OUTBOX_DIR = path.resolve('outbox');
 
-async function main() {
-  if (!fs.existsSync(JOBS_FILE)) {
-    console.error('jobs.txt not found');
-    process.exit(1);
-  }
-  if (!fs.existsSync(RESUME_FILE)) {
-    console.error('master_resume.json not found');
-    process.exit(1);
-  }
-  if (!fs.existsSync(OUTBOX_DIR)) fs.mkdirSync(OUTBOX_DIR);
+// Tunables
+const CONCURRENCY = Number(process.env.JOBBOT_CONCURRENCY || 3);
+const PLAYWRIGHT_TIMEOUT_MS = Number(process.env.PLAYWRIGHT_TIMEOUT_MS || 60000);
 
-  const jobs = fs.readFileSync(JOBS_FILE, 'utf8')
-    .split(/\r?\n/)
-    .map(s => s.trim())
-    .filter(Boolean);
-
-  const resume = JSON.parse(fs.readFileSync(RESUME_FILE, 'utf8'));
-
-  for (const url of jobs) {
-    console.log('Processing', url);
-    try {
-      const job = await fetchJob(url);
-      console.log('Fetched:', job.title || '(no title)');
-
-      const match = matchKeywords(job.description || '', resume);
-
-      const slug = (job.title || 'job').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g,'').slice(0,60);
-      const filename = `${slug || 'job'}-${Date.now()}.md`;
-      const filepath = path.join(OUTBOX_DIR, filename);
-
-      const md = buildMarkdown(job, match, resume, url);
-      fs.writeFileSync(filepath, md, 'utf8');
-      console.log('Wrote', filepath);
-
-      // commit to outbox branch & push
-      await commitOutbox(filepath);
-
-      // Telegram notification with link to outbox file
-      const repo = process.env.GITHUB_REPOSITORY || '<your-repo>';
-      const fileUrl = `https://github.com/${repo}/blob/outbox/${encodeURIComponent(filename)}`;
-      await sendTelegram(`✅ Job processed: *${job.title || 'Job'}*\nCompany: ${job.company || 'N/A'}\nMatch score: ${match.score}\nDraft: ${fileUrl}`);
-
-    } catch (err) {
-      console.error('Error processing', url, err);
-      await sendTelegram(`⚠️ JobBot error processing ${url}\n${err.message || err}`);
-    }
-  }
-  console.log('Done.');
-  process.exit(0);
+function slugify(input) {
+  return (input || '')
+    .toString()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9\-]/g, '')
+    .replace(/\-+/g, '-')
+    .replace(/(^-|-$)/g, '')
+    .slice(0, 100);
 }
 
-function buildMarkdown(job, match, resume, url) {
+function extractLinkedInJobId(url) {
+  if (!url) return null;
+  const m = url.match(/\/jobs\/view\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+async function safeSendTelegram(text) {
+  try { await sendTelegram(text); } catch (e) { console.error('Telegram error:', e && e.message ? e.message : e); }
+}
+
+function buildMarkdown(job, match, resume, url, title, company, jobId, location) {
   const lines = [];
-  lines.push(`# ${job.title || 'Job'}\n`);
-  lines.push(`**Company:** ${job.company || 'N/A'}`);
+  lines.push(`# ${title}`);
+  lines.push(`**Company:** ${company}`);
+  lines.push(`**Location:** ${location}`);
+  lines.push(`**Job ID:** ${jobId}`);
   lines.push(`**URL:** ${url}`);
-  lines.push(`\n## Extracted description\n`);
+  lines.push('\n---\n');
+  lines.push('## Extracted job description\n');
   lines.push(job.description ? `\`\`\`\n${job.description}\n\`\`\`` : '_No description found_');
   lines.push('\n## Match summary\n');
   lines.push(`- match score: ${match.score}`);
-  lines.push(`- matched skills: ${match.matched.join(', ') || 'None'}`);
-  lines.push(`- partial matches: ${match.partial.join(', ') || 'None'}`);
-  lines.push(`- missing skills: ${match.missing.join(', ') || 'None'}`);
+  lines.push(`- matched skills: ${Array.isArray(match.matched) ? match.matched.join(', ') : (match.matched || 'None')}`);
+  lines.push(`- partial matches: ${Array.isArray(match.partial) ? match.partial.join(', ') : (match.partial || 'None')}`);
+  lines.push(`- missing skills: ${Array.isArray(match.missing) ? match.missing.join(', ') : (match.missing || 'None')}`);
   lines.push('\n## Suggested bullets (from resume)\n');
-  for (const b of match.matchedBullets) {
-    lines.push(`- ${b}`);
-  }
-  lines.push('\n---\n*Generated by JobBot*');
+  const bullets = match.matchedBullets || [];
+  if (bullets.length === 0) lines.push('- _No direct bullets matched._');
+  else bullets.forEach(b => lines.push(`- ${b}`));
+  lines.push('\n---\n*Generated by JobBot — draft built against the LinkedIn post above.*');
   return lines.join('\n');
 }
 
-main();
+// Build jobs.txt from alerts-reader if missing
+function ensureJobsFile() {
+  if (fs.existsSync(JOBS_FILE)) return;
+  console.log('jobs.txt not found — attempting to generate via src/alerts-reader.js');
+  try { execSync('node src/alerts-reader.js', { stdio: 'inherit' }); }
+  catch (e) { console.error('alerts-reader failed:', e && e.message ? e.message : e); }
+  if (!fs.existsSync(JOBS_FILE)) {
+    console.error('jobs.txt still missing after alerts-reader. Place jobs.txt or alerts file (keshav_job_alerts.json/csv) in repo root.');
+    process.exit(1);
+  } else console.log('jobs.txt created.');
+}
+
+async function processJobUrl(url, resume) {
+  console.log('Processing', url);
+  let job;
+  try { job = await fetchJob(url, { timeout: PLAYWRIGHT_TIMEOUT_MS }); }
+  catch (err) {
+    console.error('fetchJob failed for', url, err && err.message ? err.message : err);
+    await safeSendTelegram(`⚠️ Failed to fetch job: ${url}\nError: ${err && err.message ? err.message : err}`);
+    return { url, ok: false, reason: 'fetch-failed' };
+  }
+
+  const jobId = extractLinkedInJobId(url) || `${Date.now()}`;
+  const title = job.title || 'Job';
+  const company = job.company || 'Company';
+  const location = job.location || 'N/A';
+
+  // quick pre-notice
+  await safeSendTelegram(`📄 Processing job — *${title}* @ *${company}*\nLocation: ${location}\nJob URL: ${url}`);
+
+  let match;
+  try { match = matchKeywords(job.description || '', resume || {}); }
+  catch (e) { console.error('matchKeywords failed:', e && e.message ? e.message : e); match = { score: 0, matched: [], partial: [], missing: [], matchedBullets: [] }; }
+
+  try {
+    if (!fs.existsSync(OUTBOX_DIR)) fs.mkdirSync(OUTBOX_DIR, { recursive: true });
+    const companySlug = slugify(company) || 'company';
+    const titleSlug = slugify(title) || 'role';
+    const filename = `${companySlug}-${titleSlug}-${jobId}.md`;
+    const filepath = path.join(OUTBOX_DIR, filename);
+    const md = buildMarkdown(job, match, resume, url, title, company, jobId, location);
+    fs.writeFileSync(filepath, md, 'utf8');
+
+    let remoteUrl = null;
+    try { remoteUrl = await commitOutbox(filepath); } catch (e) { console.error('commitOutbox error:', e && e.message ? e.message : e); }
+
+    const fallback = `https://github.com/${process.env.GITHUB_REPOSITORY || '<repo>'}/blob/outbox/outbox/${encodeURIComponent(filename)}`;
+    const fileLink = remoteUrl || fallback;
+
+    const finalMsg = `✅ Job processed\nRole: *${title}*\nCompany: *${company}*\nMatch score: ${match.score}\nDraft: ${fileLink}`;
+    await safeSendTelegram(finalMsg);
+
+    return { url, ok: true, file: fileLink, score: match.score };
+  } catch (e) {
+    console.error('Error writing/committing draft for', url, e && e.message ? e.message : e);
+    await safeSendTelegram(`⚠️ JobBot error processing ${url}\n${e && e.message ? e.message : e}`);
+    return { url, ok: false, reason: 'write-commit-failed' };
+  }
+}
+
+async function runWithConcurrency(items, workerFn, concurrency = 3) {
+  const results = [];
+  let idx = 0;
+  const workers = new Array(Math.min(concurrency, items.length)).fill(null).map(async () => {
+    while (true) {
+      const i = idx++;
+      if (i >= items.length) break;
+      try { const res = await workerFn(items[i]); results[i] = res; }
+      catch (err) { results[i] = { error: err && err.message ? err.message : err }; }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function main() {
+  ensureJobsFile();
+
+  const lines = fs.readFileSync(JOBS_FILE, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) { console.log('jobs.txt contains no lines.'); return process.exit(0); }
+
+  if (!fs.existsSync(RESUME_FILE)) { console.error('master_resume.json not found at repo root.'); return process.exit(1); }
+  const resume = JSON.parse(fs.readFileSync(RESUME_FILE, 'utf8'));
+
+  console.log(`Starting processing ${lines.length} jobs with concurrency ${CONCURRENCY}`);
+
+  const results = await runWithConcurrency(lines, url => processJobUrl(url, resume), CONCURRENCY);
+
+  const succeeded = results.filter(r => r && r.ok).length;
+  const failed = results.length - succeeded;
+  console.log(`Processing complete. Success: ${succeeded}, Failed: ${failed}`);
+
+  await safeSendTelegram(`🏁 JobBot run complete. Processed ${results.length} jobs. Success: ${succeeded}, Failed: ${failed}`);
+
+  process.exit(0);
+}
+
+main().catch(err => {
+  console.error('Unexpected error in index.js', err && err.message ? err.message : err);
+  process.exit(1);
+});
