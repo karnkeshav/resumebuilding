@@ -1,79 +1,61 @@
 // full-file: src/telegram.js
-// Minimal Telegram helper: send messages (optionally with inline buttons), getUpdates polling,
-// answer callback queries. Uses TELEGRAM_BOT_TOKEN from env.
+// Simple Telegram helper used by the bot.
+// Exports: sendTelegram(text, inlineKeyboard)
+//
+// Usage:
+//   await sendTelegram("Hello", [[{ text: 'Ok', callback_data: 'OK' }]]);
+//
+// Notes:
+// - Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in env.
+// - Uses global fetch (Node 18+). If your runner has no fetch, install node-fetch and adjust.
 
-const https = require('https');
+const token = process.env.TELEGRAM_BOT_TOKEN;
+const chatId = process.env.TELEGRAM_CHAT_ID;
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-if (!TOKEN) {
-  console.warn('TELEGRAM_BOT_TOKEN not set in env; telegram functions will noop.');
+if (!token || !chatId) {
+  console.warn('Warning: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set in env. Telegram disabled.');
 }
 
-function api(path, method = 'GET', body = null) {
-  if (!TOKEN) return Promise.resolve(null);
-  const opts = {
-    hostname: 'api.telegram.org',
-    port: 443,
-    path: `/bot${TOKEN}/${path}`,
-    method,
-    headers: { 'Content-Type': 'application/json' }
-  };
-  return new Promise((resolve, reject) => {
-    const req = https.request(opts, res => {
-      let data = '';
-      res.on('data', d => data += d);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(e); }
-      });
-    });
-    req.on('error', reject);
-    if (body) req.write(JSON.stringify(body));
-    req.end();
-  });
-}
-
-/**
- * sendTelegram(text, inlineKeyboard)
- * inlineKeyboard example:
- *  [
- *    [{ text: "Build Resume", callback_data: "BUILD|<id>" }, { text: "Skip", callback_data: "SKIP|<id>" }]
- *  ]
- */
 async function sendTelegram(text, inlineKeyboard = null) {
-  if (!TOKEN) return;
-  const body = { chat_id: process.env.TELEGRAM_CHAT_ID, text, parse_mode: 'Markdown' };
-  if (inlineKeyboard) body.reply_markup = { inline_keyboard: inlineKeyboard };
-  try {
-    const res = await api('sendMessage', 'POST', body);
-    return res;
-  } catch (e) {
-    console.error('sendTelegram error', e && e.message ? e.message : e);
-    throw e;
-  }
-}
-
-async function getUpdates(offset = 0, timeout = 0) {
-  if (!TOKEN) return null;
-  const path = `getUpdates?offset=${offset}&timeout=${timeout}`;
-  try { return await api(path, 'GET'); }
-  catch (e) { console.error('getUpdates error', e && e.message ? e.message : e); return null; }
-}
-
-async function answerCallbackQuery(callback_query_id, text = '') {
-  if (!TOKEN) return null;
-  try { return await api('answerCallbackQuery', 'POST', { callback_query_id, text }); }
-  catch (e) { console.error('answerCallbackQuery error', e && e.message ? e.message : e); return null; }
-}
-
-async function editMessageReplyMarkup(chat_id, message_id) {
-  if (!TOKEN) return null;
-  try {
-    return await api('editMessageReplyMarkup', 'POST', { chat_id, message_id });
-  } catch (e) {
-    console.error('editMessageReplyMarkup error', e && e.message ? e.message : e);
+  if (!token || !chatId) {
+    console.log('Telegram disabled, would send:', text);
     return null;
   }
+
+  // Telegram has special characters in Markdown; keep it simple by using MarkdownV2 only when necessary.
+  // We'll default to Markdown, but escape only a few troublesome chars if needed.
+  const payload = {
+    chat_id: chatId,
+    text: text,
+    parse_mode: 'Markdown',
+    disable_web_page_preview: false
+  };
+
+  if (inlineKeyboard) {
+    // Expect inlineKeyboard in the format used in index.js:
+    // [ [ { text, callback_data }, { text, callback_data } ] ]
+    payload.reply_markup = JSON.stringify({ inline_keyboard: inlineKeyboard });
+  }
+
+  try {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      // 10s timeout fallback not available here; GH actions run should be stable.
+    });
+
+    const data = await res.json();
+    if (!res.ok || (data && data.ok === false)) {
+      console.error('Telegram API error:', data);
+      throw new Error(`Telegram send failed: ${JSON.stringify(data)}`);
+    }
+    return data;
+  } catch (err) {
+    console.error('sendTelegram error:', err && err.message ? err.message : err);
+    throw err;
+  }
 }
 
-module.exports = { sendTelegram, getUpdates, answerCallbackQuery, editMessageReplyMarkup };
+module.exports = { sendTelegram };
