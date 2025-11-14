@@ -1,36 +1,103 @@
 {
-  "name": "Keshav Karn",
-  "contact": {
+  "header": {
+    "name": "Keshav Karn",
+    "phone": "8520977573",
     "email": "keshavkarn1976@gmail.com",
-    "phone": "+91-XXXXXXXXXX"
+    "location": "Hyderabad, India",
+    "linkedin": "https://www.linkedin.com/in/",
+    "credly": "https://www.credly.com/users/keshav-karn"
   },
-  "summary": "Senior Software Developer / Tech Lead with 14+ years experience in React, GraphQL, Drupal, SSO.",
+  "summary": "Senior IT leader with 20+ years of experience in ITSM, ITOM, SRE, FinOps, automation and large-scale service operations. Strong background in designing stable, scalable processes, leading cross-functional teams, and delivering cost-optimisation and reliability improvements across enterprise environments.",
   "skills": [
-    "React",
-    "Redux",
-    "GraphQL",
-    "TypeScript",
-    "JavaScript",
-    "Node.js",
-    "Playwright",
-    "Selenium",
+    "ITSM",
+    "ITOM",
+    "ServiceNow",
+    "SRE",
+    "FinOps",
+    "Automation",
+    "Custom GPT",
+    "Capacity Management",
+    "Monitoring & Observability",
+    "Infrastructure Solutions",
     "CI/CD",
-    "AWS",
+    "Cloud (AWS/Azure)",
     "Docker",
     "Kubernetes",
-    "SSO",
-    "Salesforce"
+    "Scripting (PowerShell/Bash)",
+    "Incident Management",
+    "Change Management",
+    "Problem Management",
+    "Process Governance",
+    "Stakeholder Management"
   ],
   "experience": [
     {
-      "company": "ExampleCorp",
-      "title": "Senior Software Developer",
-      "period": "2018-2025",
+      "company": "PwC",
+      "title": "Senior Manager — ITSM & FinOps",
+      "period": "Sep 2024 – Jun 2025",
       "bullets": [
-        "Led front-end development using React and TypeScript for multiple high-traffic apps.",
-        "Integrated SSO and OAuth flows across internal portals.",
-        "Built CI/CD pipelines and containerized services using Docker and Kubernetes."
+        "Led ITSM and FinOps initiatives to improve cloud cost visibility and control.",
+        "Defined and implemented FinOps governance frameworks for tagging, reporting and optimization.",
+        "Partnered with finance, engineering and operations teams to deliver measurable cost savings.",
+        "Drove ITSM improvements to streamline workflows and reduce incident lifecycle."
+      ]
+    },
+    {
+      "company": "Kyndryl Solutions Pvt. Ltd.",
+      "title": "Associate Director — ITSM Automation, CustomGPT & ITOM Enablement",
+      "period": "Sep 2021 – Aug 2024",
+      "bullets": [
+        "Owned enterprise-wide ITSM automation programs, from concept to implementation.",
+        "Designed and deployed CustomGPT-based knowledge and automation accelerators.",
+        "Enabled ITOM frameworks including monitoring, event correlation and reduction.",
+        "Standardised automation patterns and mentored teams to improve uptake."
+      ]
+    },
+    {
+      "company": "IBM",
+      "title": "Associate Director — Global Process Owner (ITSM, SRE & Capacity Management)",
+      "period": "Sep 2021 – Aug 2024",
+      "bullets": [
+        "Served as Global Process Owner for ITSM, SRE and capacity management functions.",
+        "Implemented capacity planning and forecasting to reduce over-provisioning.",
+        "Established reliability engineering frameworks and runbook standards.",
+        "Collaborated with delivery teams to align incident, change and release practices."
+      ]
+    },
+    {
+      "company": "Wipro Technologies",
+      "title": "Senior Consultant — ITSM & Automation Leader",
+      "period": "Jun 2010 – Nov 2013",
+      "bullets": [
+        "Led enterprise-scale ITSM implementations and automation solutions.",
+        "Automated recurring operational tasks and incident remediation workflows.",
+        "Collaborated with customers to translate business requirements into scalable processes.",
+        "Guided junior engineers and standardized operational documentation."
+      ]
+    },
+    {
+      "company": "Tech Mahindra Ltd.",
+      "title": "Senior Technical Associate — Lead, Infrastructure & Monitoring Solutions",
+      "period": "Oct 2006 – May 2010",
+      "bullets": [
+        "Designed and deployed infrastructure monitoring solutions across global accounts.",
+        "Owned alerting standards, dashboards and monitoring configurations.",
+        "Provided escalation-level technical support and incident management.",
+        "Improved system stability through proactive tuning and capacity checks."
+      ]
+    },
+    {
+      "company": "Mainstay Teleservices",
+      "title": "Senior 2nd Line Specialist — Technical SME & Support Escalation Lead",
+      "period": "Mar 2003 – Oct 2006",
+      "bullets": [
+        "Acted as SME for high-priority escalations from L1 and L2 teams.",
+        "Resolved critical incidents and coordinated across engineering teams.",
+        "Created and maintained knowledge base articles and SOPs.",
+        "Led efforts to reduce ticket reopens and improve resolution quality."
       ]
     }
-  ]
+  ],
+  "education": [],
+  "certifications": []
 }
