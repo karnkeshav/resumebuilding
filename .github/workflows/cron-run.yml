@@ -2,8 +2,8 @@ name: Job Scraper
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # runs every 10 minutes
-  workflow_dispatch:        # manual trigger
+    - cron: "0 * * * *"   # runs every 1 hour (at minute 0 of every hour) — UTC
+  workflow_dispatch:      # manual trigger
 
 jobs:
   scrape:
@@ -25,6 +25,7 @@ jobs:
       # 🔥 RESTORE LINKEDIN COOKIES FROM GITHUB SECRET
       ###########################################################
       - name: Restore LinkedIn cookies
+        if: ${{ secrets.LINKEDIN_COOKIES != '' }}
         run: |
           echo "${{ secrets.LINKEDIN_COOKIES }}" | base64 --decode > cookies.json
           echo "cookies.json restored successfully."
@@ -36,11 +37,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
-          # GitHub Repo details
+          # GitHub Repo details (used by git-helper)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-
         run: node src/index.js
 
       ###########################################################
