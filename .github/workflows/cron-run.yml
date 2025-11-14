@@ -1,45 +1,58 @@
-name: JobBot scheduled run
-
-permissions:
-  contents: write
+name: Job Scraper
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: "*/10 * * * *"   # runs every 10 minutes
+  workflow_dispatch:        # manual trigger
 
 jobs:
-  run-jobbot:
+  scrape:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout (with token preserved)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
 
-      - name: Setup Node.js
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 18
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+      ###########################################################
+      # 🔥 RESTORE LINKEDIN COOKIES FROM GITHUB SECRET
+      ###########################################################
+      - name: Restore LinkedIn cookies
+        run: |
+          echo "${{ secrets.LINKEDIN_COOKIES }}" | base64 --decode > cookies.json
+          echo "cookies.json restored successfully."
 
-      - name: Build jobs.txt from alerts (JSON/CSV)
-        run: node src/alerts-reader.js
-
-      - name: Expand search->links (discover job view URLs)
-        run: node src/fetch-links.js
-
-      - name: Run jobbot (scrape, tailor draft, commit, notify)
+      ###########################################################
+      # 🔥 RUN SCRAPER
+      ###########################################################
+      - name: Run job scraper
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          # GitHub Repo details
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+
         run: node src/index.js
+
+      ###########################################################
+      # 🔥 COMMIT updated job state (e.g., jobs.txt updates)
+      ###########################################################
+      - name: Commit job state updates
+        run: |
+          git config --local user.email "jobbot@users.noreply.github.com"
+          git config --local user.name "jobbot[bot]"
+
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Poller: update state"
+            git push
+          fi
