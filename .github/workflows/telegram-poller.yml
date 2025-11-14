@@ -2,7 +2,7 @@ name: Telegram Poller
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # runs every 5 min
+    - cron: "*/5 * * * *"   # every 5 minutes
   workflow_dispatch:
 
 jobs:
@@ -22,8 +22,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Deps
-        run: npm install
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Run Telegram poller
         env:
@@ -34,10 +34,14 @@ jobs:
 
       - name: Commit and Push State (if changed)
         run: |
-          git add -A
+          git config user.email "jobbot@users.noreply.github.com"
+          git config user.name "jobbot[bot]"
+          git add state/selected.json state/offset.txt || true
           if ! git diff --cached --quiet; then
             git commit -m "Poller: update state"
             git push
+          else
+            echo "No changes to commit."
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
