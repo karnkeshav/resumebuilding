@@ -1,0 +1,29 @@
+name: Telegram 12h Prompt
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'   # top of the hour every 12 hours
+  workflow_dispatch:
+
+jobs:
+  prompt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run 12h prompt
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          node -e "const t=require('./src/telegram'); (async()=>{ await t.sendTelegram('Do you want to add new job titles to search? Reply YES or NO.'); console.log('prompt sent'); })().catch(e=>{console.error(e)})"
