@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - 'state/selected.json'
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-resume:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,12 +23,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install deps
-        run: npm install --no-audit --no-fund
+      - name: Install dependencies
+        run: |
+          npm install --no-audit --no-fund
 
       - name: Run resume builder
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: node src/resume-builder.js
