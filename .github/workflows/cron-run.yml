@@ -1,57 +1,108 @@
-name: Job Scraper
+name: cron-run
+
+# Give workflow explicit write permission so it can push commits.
+permissions:
+  contents: write
+  actions: read
 
 on:
+  # run hourly (adjust cron as you like)
   schedule:
-    - cron: "0 * * * *"   # runs at minute 0 every hour (UTC)
-  workflow_dispatch:      # manual trigger
+    - cron: '0 * * * *'
+  # allow manual runs
+  workflow_dispatch:
 
 jobs:
-  scrape:
+  scraper:
     runs-on: ubuntu-latest
-
+    env:
+      # repo-level secrets (do NOT add secrets values here)
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      LINKEDIN_COOKIES: ${{ secrets.LINKEDIN_COOKIES }}
+      # Optional: if you can't get GITHUB_TOKEN write permission, set a PAT in secrets (PUSH_TOKEN)
+      PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
     steps:
-      - name: Checkout repo (allow pushes)
+
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # important so pushes use the provided token
           persist-credentials: true
+          fetch-depth: 0
 
-      - name: Set up Node
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Show Git / Actor info (debug)
+        run: |
+          echo "GITHUB_ACTOR=${GITHUB_ACTOR}"
+          echo "Repository: $GITHUB_REPOSITORY"
+          git --version
+          git config --list
+
+      - name: Decode LINKEDIN_COOKIES to cookies.json
+        if: ${{ secrets.LINKEDIN_COOKIES != '' }}
+        run: |
+          echo "Decoding LINKEDIN_COOKIES secret to cookies.json"
+          echo "${{ secrets.LINKEDIN_COOKIES }}" | base64 --decode > cookies.json
+          ls -la cookies.json
+          # show first line (sanity check, never print full cookie values)
+          head -n 1 cookies.json || true
 
       - name: Install dependencies
-        run: npm install
-
-      # Restore LinkedIn cookies if secret available
-      - name: Restore LinkedIn cookies
-        env:
-          LINKEDIN_COOKIES: ${{ secrets.LINKEDIN_COOKIES }}
         run: |
-          if [ -z "${LINKEDIN_COOKIES}" ]; then
-            echo "LINKEDIN_COOKIES secret not set — continuing without cookies."
-          else
-            echo "${LINKEDIN_COOKIES}" | base64 --decode > cookies.json
-            echo "cookies.json restored successfully."
-          fi
+          npm ci
 
-      - name: Run job scraper
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # GitHub Repo details (used by git-helper)
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node src/index.js
-
-      - name: Commit job state updates
+      - name: Run scraper (create outbox drafts and send Telegram)
+        id: run_scraper
+        # set a reasonably long timeout for Playwright
         run: |
-          git config --local user.email "jobbot@users.noreply.github.com"
-          git config --local user.name "jobbot[bot]"
-          git add -A
+          echo "Running scraper..."
+          # If you use a different startup script, replace the command below
+          node src/index.js
+        continue-on-error: false
+
+      - name: Show generated outbox files (debug)
+        run: |
+          echo "Outbox files:"
+          ls -la outbox || echo "No outbox directory"
+          echo "---- First 40 lines of each outbox file ----"
+          for f in outbox/*.md 2>/dev/null || true; do
+            echo "---- $f ----"
+            head -n 40 "$f"
+            echo
+          done
+
+      # If organization policies block GITHUB_TOKEN write access, use a PAT fallback.
+      - name: Setup push auth with PAT (optional)
+        if: ${{ secrets.PUSH_TOKEN != '' }}
+        run: |
+          echo "Using PUSH_TOKEN PAT for push auth"
+          git remote set-url origin https://x-access-token:${{ secrets.PUSH_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Commit outbox changes (if any)
+        run: |
+          set -e
+          # Configure a bot identity for commits
+          git config user.email "jobbot@users.noreply.github.com"
+          git config user.name "jobbot[bot]"
+
+          git add -A outbox || true
+          # only commit if there are staged changes
           if ! git diff --cached --quiet; then
-            git commit -m "Poller: update state"
-            git push
+            echo "Committing outbox changes..."
+            git commit -m "Scraper: update outbox (cron-run)"
+            # push - will use GITHUB_TOKEN (via checkout) or the PAT if set above
+            git push origin HEAD:${{ github.ref_name }} || (echo "Push failed"; git remote -v; exit 1)
+          else
+            echo "No changes to commit."
           fi
+
+      - name: Optional: push resume-outputs branch (if your scraper creates any outputs directly)
+        if: ${{ always() }}
+        run: |
+          echo "No-op step; add any branch-specific pushes here if required."
