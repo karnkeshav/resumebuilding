@@ -91,7 +91,7 @@ async function commitOutbox(filePath) {
     exec('git remote remove deploy-remote || true');
 
     // return a convenient file URL (best-effort)
-    return `https://github.com/${repo}/blob/${branch}/${encodeURIComponent(destName)}`;
+       return `https://github.com/${repo}/blob/${branch}/outbox/${encodeURIComponent(destName)}`;
   } catch (err) {
     console.error('git helper error:', err && err.message ? err.message : err);
     // attempt cleanup
