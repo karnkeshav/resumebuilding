@@ -24,7 +24,6 @@ jobs:
 
       - name: Install dependencies (safe)
         run: |
-          # Always use npm install in CI to avoid package-lock mismatch errors
           echo "Running npm install (safe fallback)"
           npm install --no-audit --no-fund
 
