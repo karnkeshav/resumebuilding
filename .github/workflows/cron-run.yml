@@ -14,7 +14,7 @@ jobs:
       LINKEDIN_COOKIES: ${{ secrets.LINKEDIN_COOKIES }}
       PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (no auto credentials)
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -32,13 +32,13 @@ jobs:
           echo "${{ secrets.LINKEDIN_COOKIES }}" | base64 --decode > cookies.json || true
           ls -la cookies.json || true
 
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
 
       - name: Run scraper
         run: node src/index.js
 
-      - name: Show outbox (debug)
+      - name: Show outbox debug
         run: |
           ls -la outbox || true
           for f in outbox/*.md 2>/dev/null || true; do
@@ -46,7 +46,7 @@ jobs:
             head -n 30 "$f"
           done
 
-      - name: Setup push auth with PAT (required)
+      - name: Setup push auth with PAT
         if: ${{ secrets.PUSH_TOKEN != '' }}
         run: |
           echo "Setting remote to use PAT"
@@ -60,8 +60,7 @@ jobs:
           git add -A outbox || true
           if ! git diff --cached --quiet; then
             git commit -m "Scraper: update outbox (cron-run)" || true
-            echo "Pushing to repo..."
-            git push origin HEAD:${{ github.ref_name }} || (echo "Push failed with exit $?" && exit 1)
+            git push origin HEAD:${{ github.ref_name }} || (echo "Push failed" && exit 1)
           else
             echo "No changes to commit."
           fi
