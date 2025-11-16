@@ -1,12 +1,13 @@
 {
-  "name": "jobbot",
+  "name": "resume-tailor",
   "version": "0.1.0",
-  "description": "JobBot GitHub Actions starter - Playwright + keyword matching + Telegram",
-  "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node scripts/tailor_resume.js"
   },
   "dependencies": {
-    "playwright": "^1.43.0"
+    "pdf-parse": "^1.1.1",
+    "node-fetch": "^3.4.0",
+    "minimist": "^1.2.8",
+    "puppeteer": "^21.0.0"
   }
 }
