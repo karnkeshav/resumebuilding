@@ -1,4 +1,4 @@
-name: Tailor Resume (manual)
+name: Tailor Resume (manual ready)
 
 on:
   workflow_dispatch:
@@ -16,9 +16,9 @@ on:
         required: true
         default: 'ExampleCorp'
       resume_path:
-        description: 'Path to your resume file in repo (DOCX). e.g. resumes/KeshavLilyresume.docx'
+        description: 'Path to your resume file in repo (DOCX). e.g. resumes/Keshav-resume.docx'
         required: true
-        default: 'resumes/KeshavLilyresume.docx'
+        default: 'resumes/Keshav-resume.docx'
       max_iterations:
         description: 'How many revise iterations (default 1)'
         required: false
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -40,10 +40,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tailor script
+      - name: Run Tailor Resume script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_API_URL: ${{ secrets.GEMINI_API_URL }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          MAX_OUTPUT_TOKENS: '4096'
         run: |
           node ./scripts/tailor_resume.js \
             --job-title "${{ inputs.job_title }}" \
@@ -52,7 +53,7 @@ jobs:
             --resume-path "${{ inputs.resume_path }}" \
             --max-iterations "${{ inputs.max_iterations }}"
 
-      - name: Upload final resume artifact
+      - name: Upload output artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
