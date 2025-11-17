@@ -1,64 +1,106 @@
 // scripts/tailor_resume.js
+// Updated to use Gemini v1 model endpoints (e.g. gemini-2.5-flash).
+// Requirements: mammoth, marked, puppeteer, node-fetch, minimist
+// Env vars required: GEMINI_API_KEY (AI Studio key), optionally GEMINI_MODEL (default gemini-2.5-flash)
+// Usage (example):
+// node scripts/tailor_resume.js --job-title "SRE" --job-desc "..." --company "Acme" --resume-path "resumes/KeshavLilyresume.docx"
+
 const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch');
-const pdf = require('pdf-parse');
+const mammoth = require('mammoth');
+const { marked } = require('marked');
 const puppeteer = require('puppeteer');
 const argv = require('minimist')(process.argv.slice(2));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = process.env.GEMINI_API_URL;
-
-if (!GEMINI_API_KEY || !GEMINI_API_URL) {
-  console.error('Set GEMINI_API_KEY and GEMINI_API_URL as environment variables (GitHub secrets).');
+if (!GEMINI_API_KEY) {
+  console.error('ERROR: GEMINI_API_KEY environment variable is required.');
   process.exit(1);
 }
+
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1/models';
 
 const jobTitle = argv['job-title'] || argv.jobTitle || 'Software Engineer';
 const jobDesc = argv['job-desc'] || argv.jobDesc || argv['job-description'] || '';
 const company = argv.company || 'Company';
-const resumePath = argv['resume-path'] || 'resumes/Keshav_Resume.pdf';
+const resumePath = argv['resume-path'] || 'resumes/KeshavLilyresume.docx';
 const maxIterations = parseInt(argv['max-iterations'] || 1, 10) || 1;
+const MAX_OUTPUT_TOKENS = parseInt(process.env.MAX_OUTPUT_TOKENS || 2048, 10);
 
-async function extractTextFromPdf(filePath) {
-  const data = fs.readFileSync(filePath);
-  const res = await pdf(data);
-  return res.text;
+async function extractTextFromDocx(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value.replace(/\r/g, '').trim();
 }
 
-async function callGemini(prompt, temperature = 0.2, maxTokens = 1200) {
-  // Generic POST - adapt to your provider's schema.
+// Robust Gemini caller: uses query ?key= for AI Studio keys
+async function callGemini(prompt, opts = {}) {
+  const model = opts.model || GEMINI_MODEL;
+  const url = `${GEMINI_BASE}/${model}:generateContent?key=${GEMINI_API_KEY}`;
+
   const body = {
-    model: "gemini-prop", // replace/model as needed
-    input: prompt,
-    // optional: temperature, max tokens etc.
+    contents: [
+      {
+        parts: [
+          { text: prompt }
+        ]
+      }
+    ],
+    temperature: opts.temperature ?? 0.2,
+    maxOutputTokens: opts.maxOutputTokens ?? MAX_OUTPUT_TOKENS
+    // add other fields (safetySettings etc.) if needed
   };
 
-  const resp = await fetch(GEMINI_API_URL, {
+  const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${GEMINI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    timeout: 120000,
+    // no Authorization header for AI Studio API key-usage via ?key=
   });
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Gemini API error ${resp.status}: ${text}`);
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const message = json ? JSON.stringify(json) : `HTTP ${res.status}`;
+    throw new Error(`Gemini API error ${res.status}: ${message}`);
   }
 
-  const json = await resp.json();
-  // Adapt to response schema: try to find text in common fields
-  // Examples: json.output_text, json.choices[0].message.content, json.result...
-  if (json.output_text) return json.output_text;
-  if (json.choices && json.choices[0] && json.choices[0].message) {
-    return json.choices[0].message.content;
+  // Try multiple common response shapes to extract answer text
+  // 1) json.output_text
+  if (json && typeof json.output_text === 'string') return json.output_text;
+
+  // 2) json.candidates[0].content (string)
+  if (json && Array.isArray(json.candidates) && json.candidates[0]) {
+    const cand = json.candidates[0];
+    if (typeof cand.content === 'string') return cand.content;
+    // sometimes content is an array of objects with 'text' fields
+    if (Array.isArray(cand.content)) {
+      const parts = cand.content.map(p => (typeof p === 'string' ? p : (p.text || JSON.stringify(p)))).join('\n');
+      if (parts.trim()) return parts;
+    }
+    // older shapes: candidates[0].output or candidates[0].message etc.
+    if (cand.output && Array.isArray(cand.output)) {
+      const out = cand.output.map(o => (o.text || JSON.stringify(o))).join('\n');
+      if (out.trim()) return out;
+    }
+    if (cand.message && cand.message.content) {
+      // message.content might be an array or string
+      if (typeof cand.message.content === 'string') return cand.message.content;
+      if (Array.isArray(cand.message.content)) {
+        return cand.message.content.map(c => (c.text || JSON.stringify(c))).join('\n');
+      }
+    }
   }
-  if (json.choices && json.choices[0] && json.choices[0].text) {
-    return json.choices[0].text;
+
+  // 3) json.output (array) with content blocks
+  if (json && Array.isArray(json.output) && json.output[0] && Array.isArray(json.output[0].content)) {
+    const outParts = json.output[0].content.map(p => p.text || JSON.stringify(p)).join('\n');
+    if (outParts.trim()) return outParts;
   }
+
+  // 4) fallback: stringify whole response
   return JSON.stringify(json);
 }
 
@@ -78,8 +120,8 @@ Task:
 1) Produce a tailored resume (in Markdown) that emphasizes relevant skills, achievements, and keywords matching the job description.
 2) Keep it concise — 1-2 pages equivalent, with bullet points for responsibilities & achievements.
 3) Where possible, quantify achievements (use reasonable placeholders if specific numbers are not present).
-4) Use headings: Name, Contact (leave placeholder), Summary, Skills, Experience (with bullets), Education, Certifications (if any).
-5) Return ONLY the resume in Markdown (no analysis).
+4) Use headings: Name, Contact (leave placeholders), Summary, Skills, Experience (with bullets), Education, Certifications (if any).
+5) Return ONLY the resume in Markdown (no analysis, no extra commentary).
 `;
 }
 
@@ -111,70 +153,68 @@ Recruiter gaps (JSON):
 ${gapsJson}
 
 Task:
-1) Modify the resume to address the gaps as best as possible. If the fix requires adding quantification that is not present, add reasonable, conservative phrasing like "Led a team of X" -> "Led a small team" OR "Increased X by Y%" -> "Improved X significantly (quantified where possible)" — but mark any invented numbers with parentheses and note they should be replaced.
+1) Modify the resume to address the gaps as best as possible. If the fix requires adding quantification that is not present, add conservative phrasing and mark any invented numbers with parentheses and a note that they should be replaced.
 2) Return only the final updated resume in Markdown.
 `;
 }
 
 async function saveMarkdownAsPdf(markdownText, outPdfPath, title = 'Tailored Resume') {
-  const htmlTemplate = fs.readFileSync(path.join(__dirname, '..', 'templates', 'resume_template.html'), 'utf8');
-  const filled = htmlTemplate.replace('{{CONTENT}}', markdownText).replace('{{TITLE}}', title);
+  const templatePath = path.join(__dirname, '..', 'templates', 'resume_template.html');
+  const template = fs.existsSync(templatePath) ? fs.readFileSync(templatePath, 'utf8') : '<html><body>{{CONTENT}}</body></html>';
+  const htmlResume = marked.parse(markdownText);
+  const filled = template.replace('{{CONTENT}}', htmlResume).replace('{{TITLE}}', title);
 
-  if (!fs.existsSync(path.join(process.cwd(), 'output'))) {
-    fs.mkdirSync(path.join(process.cwd(), 'output'));
-  }
-  const htmlPath = path.join(process.cwd(), 'output', 'tailored_resume.html');
-  fs.writeFileSync(htmlPath, filled, 'utf8');
+  if (!fs.existsSync(path.join(process.cwd(), 'output'))) fs.mkdirSync(path.join(process.cwd(), 'output'));
+  fs.writeFileSync(path.join(process.cwd(), 'output', 'tailored_resume_rendered.html'), filled, 'utf8');
 
-  const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox']});
+  const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   const page = await browser.newPage();
   await page.setContent(filled, { waitUntil: 'networkidle0' });
-  await page.pdf({ path: outPdfPath, format: 'A4', printBackground: true });
+  await page.pdf({ path: outPdfPath, format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm' } });
   await browser.close();
 }
 
 (async () => {
   try {
-    console.log('Reading resume from', resumePath);
     const absResume = path.isAbsolute(resumePath) ? resumePath : path.join(process.cwd(), resumePath);
     if (!fs.existsSync(absResume)) {
       console.error('Resume file not found at', absResume);
       process.exit(2);
     }
 
-    const resumeText = await extractTextFromPdf(absResume);
-    console.log('Extracted resume text length:', resumeText.length);
+    console.log('Extracting text from', absResume);
+    const resumeText = await extractTextFromDocx(absResume);
+    console.log(`Extracted resume text length: ${resumeText.length}`);
 
     // 1) Tailor
     console.log('Calling Gemini to tailor resume...');
     const tailorPrompt = buildTailorPrompt(resumeText, jobTitle, jobDesc);
-    const tailored = await callGemini(tailorPrompt);
-
-    // Save intermediate
+    const tailored = await callGemini(tailorPrompt, { temperature: 0.2, maxOutputTokens: 4096 });
     if (!fs.existsSync('./output')) fs.mkdirSync('./output');
     fs.writeFileSync('./output/tailored_resume_stage1.md', tailored, 'utf8');
+    console.log('Stage 1 tailored resume saved.');
 
     // 2) Recruiter review
-    console.log('Asking Gemini to role-play recruiter and identify gaps...');
+    console.log('Calling Gemini to role-play recruiter and identify gaps...');
     const reviewPrompt = buildRecruiterReviewPrompt(tailored, company, jobTitle, jobDesc);
-    const gapsRaw = await callGemini(reviewPrompt);
-    // We expect JSON; try to parse
+    const gapsRaw = await callGemini(reviewPrompt, { temperature: 0.1, maxOutputTokens: 1024 });
+    // Try to extract JSON body if present
     let gapsJson = gapsRaw;
     try {
-      // Some LLMs return newline or code fences — extract first JSON object
       const m = gapsRaw.match(/\{[\s\S]*\}/);
       if (m) gapsJson = m[0];
       JSON.parse(gapsJson);
     } catch (e) {
-      console.warn('Could not parse gaps JSON strictly; sending raw text onward.');
+      console.warn('Warning: could not parse recruiter gaps strictly as JSON; saving raw text.');
+      gapsJson = gapsRaw;
     }
     fs.writeFileSync('./output/recruiter_gaps.json.txt', gapsJson, 'utf8');
+    console.log('Recruiter gaps saved.');
 
-    // 3) Fix gaps and produce final
-    console.log('Asking Gemini to fix gaps and produce final resume...');
+    // 3) Fix gaps
+    console.log('Calling Gemini to fix gaps and produce final resume...');
     const fixPrompt = buildFixPrompt(tailored, gapsJson);
-    const fixedResume = await callGemini(fixPrompt);
-
+    const fixedResume = await callGemini(fixPrompt, { temperature: 0.15, maxOutputTokens: 4096 });
     fs.writeFileSync('./output/tailored_resume_final.md', fixedResume, 'utf8');
 
     // 4) Render PDF
@@ -182,10 +222,12 @@ async function saveMarkdownAsPdf(markdownText, outPdfPath, title = 'Tailored Res
     console.log('Rendering PDF to', outPdf);
     await saveMarkdownAsPdf(fixedResume, outPdf, `${jobTitle} - Tailored Resume`);
 
-    console.log('Done. Artifacts in ./output/');
+    console.log('All done. Artifacts written to ./output/');
     process.exit(0);
   } catch (err) {
-    console.error('ERROR', err);
+    console.error('ERROR:', err && err.message ? err.message : err);
+    // write full error to file for debugging
+    try { fs.writeFileSync('./output/error.txt', String(err)); } catch (e) {}
     process.exit(10);
   }
 })();
