@@ -1,4 +1,4 @@
-name: Tailor Resume (manual-ready)
+name: Tailor Resume (manual)
 
 on:
   workflow_dispatch:
@@ -8,19 +8,19 @@ on:
         required: true
         default: 'Software Engineer'
       job_description:
-        description: 'Paste the full job description here'
+        description: 'Paste the full job description'
         required: true
         default: 'Enter JD here'
       company_name:
-        description: 'Company name for recruiter review'
+        description: 'Company name'
         required: true
         default: 'ExampleCorp'
       resume_path:
-        description: 'Path to your resume file (DOCX)'
+        description: 'Path to your resume DOCX file'
         required: true
         default: 'resumes/Keshav-resume.docx'
       max_iterations:
-        description: 'How many revise iterations'
+        description: 'Iterations for improvement'
         required: false
         default: '1'
 
@@ -38,16 +38,16 @@ jobs:
         with:
           node-version: '20'
 
+      # ⭐ FIX APPLIED → npm ci removed, using safe npm install instead
       - name: Install dependencies
         run: |
-          echo "Using npm install (no lockfile)"
+          echo "No package-lock.json — using npm install"
           npm install --no-audit --no-fund
 
       - name: Run Tailor Resume Script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: 'gemini-2.5-flash'
-          MAX_OUTPUT_TOKENS: '4096'
         run: |
           node ./scripts/tailor_resume.js \
             --job-title "${{ inputs.job_title }}" \
@@ -56,7 +56,7 @@ jobs:
             --resume-path "${{ inputs.resume_path }}" \
             --max-iterations "${{ inputs.max_iterations }}"
 
-      - name: Upload Resume Artifacts
+      - name: Upload Resume Outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
