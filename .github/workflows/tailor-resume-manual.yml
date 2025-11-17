@@ -1,4 +1,4 @@
-name: Tailor Resume (manual)
+name: Tailor Resume (manual-ready)
 
 on:
   workflow_dispatch:
@@ -8,19 +8,19 @@ on:
         required: true
         default: 'Software Engineer'
       job_description:
-        description: 'Paste the full job description (or short summary)'
+        description: 'Paste the full job description here'
         required: true
-        default: 'Enter job description here'
+        default: 'Enter JD here'
       company_name:
-        description: 'Company name (for recruiter role-play)'
+        description: 'Company name for recruiter review'
         required: true
         default: 'ExampleCorp'
       resume_path:
-        description: 'Path to your resume file in repo (DOCX). e.g. resumes/Keshav-resume.docx'
+        description: 'Path to your resume file (DOCX)'
         required: true
         default: 'resumes/Keshav-resume.docx'
       max_iterations:
-        description: 'How many revise iterations (default 1)'
+        description: 'How many revise iterations'
         required: false
         default: '1'
 
@@ -28,6 +28,7 @@ jobs:
   tailor:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,16 +38,15 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies (ci, fallback to install)
+      - name: Install dependencies
         run: |
-          set -e
-          echo "Trying npm ci (preferred)..."
-          npm ci || (echo "npm ci failed — running npm install" && npm install --no-audit --no-fund)
+          echo "Using npm install (no lockfile)"
+          npm install --no-audit --no-fund
 
-      - name: Run Tailor Resume script
+      - name: Run Tailor Resume Script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_MODEL: 'gemini-2.5-flash'
           MAX_OUTPUT_TOKENS: '4096'
         run: |
           node ./scripts/tailor_resume.js \
@@ -56,7 +56,7 @@ jobs:
             --resume-path "${{ inputs.resume_path }}" \
             --max-iterations "${{ inputs.max_iterations }}"
 
-      - name: Upload output artifacts
+      - name: Upload Resume Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
