@@ -1,9 +1,12 @@
 // scripts/tailor_resume.js
-// Updated to use Gemini v1 model endpoints (e.g. gemini-2.5-flash).
-// Requirements: mammoth, marked, puppeteer, node-fetch, minimist
-// Env vars required: GEMINI_API_KEY (AI Studio key), optionally GEMINI_MODEL (default gemini-2.5-flash)
+// Reads DOCX resume, calls Gemini generateContent (v1), performs recruiter review and fixes,
+// renders final Markdown to PDF. Writes artifacts to ./output/
+//
+// Requirements (package.json): mammoth, marked, puppeteer, node-fetch, minimist
+// Make sure GEMINI_API_KEY is set in env (GitHub Secrets).
+//
 // Usage (example):
-// node scripts/tailor_resume.js --job-title "SRE" --job-desc "..." --company "Acme" --resume-path "resumes/KeshavLilyresume.docx"
+// node scripts/tailor_resume.js --job-title "SRE" --job-desc "..." --company "Acme" --resume-path "resumes/Keshav-resume.docx"
 
 const fs = require('fs');
 const path = require('path');
@@ -25,7 +28,7 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1/models';
 const jobTitle = argv['job-title'] || argv.jobTitle || 'Software Engineer';
 const jobDesc = argv['job-desc'] || argv.jobDesc || argv['job-description'] || '';
 const company = argv.company || 'Company';
-const resumePath = argv['resume-path'] || 'resumes/KeshavLilyresume.docx';
+const resumePath = argv['resume-path'] || 'resumes/Keshav-resume.docx';
 const maxIterations = parseInt(argv['max-iterations'] || 1, 10) || 1;
 const MAX_OUTPUT_TOKENS = parseInt(process.env.MAX_OUTPUT_TOKENS || 2048, 10);
 
@@ -35,7 +38,6 @@ async function extractTextFromDocx(filePath) {
   return result.value.replace(/\r/g, '').trim();
 }
 
-// Robust Gemini caller: uses query ?key= for AI Studio keys
 async function callGemini(prompt, opts = {}) {
   const model = opts.model || GEMINI_MODEL;
   const url = `${GEMINI_BASE}/${model}:generateContent?key=${GEMINI_API_KEY}`;
@@ -50,43 +52,35 @@ async function callGemini(prompt, opts = {}) {
     ],
     temperature: opts.temperature ?? 0.2,
     maxOutputTokens: opts.maxOutputTokens ?? MAX_OUTPUT_TOKENS
-    // add other fields (safetySettings etc.) if needed
   };
 
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    // no Authorization header for AI Studio API key-usage via ?key=
   });
 
   const json = await res.json().catch(() => null);
-
   if (!res.ok) {
     const message = json ? JSON.stringify(json) : `HTTP ${res.status}`;
     throw new Error(`Gemini API error ${res.status}: ${message}`);
   }
 
-  // Try multiple common response shapes to extract answer text
-  // 1) json.output_text
+  // Extract text from common shapes
   if (json && typeof json.output_text === 'string') return json.output_text;
 
-  // 2) json.candidates[0].content (string)
   if (json && Array.isArray(json.candidates) && json.candidates[0]) {
     const cand = json.candidates[0];
     if (typeof cand.content === 'string') return cand.content;
-    // sometimes content is an array of objects with 'text' fields
     if (Array.isArray(cand.content)) {
       const parts = cand.content.map(p => (typeof p === 'string' ? p : (p.text || JSON.stringify(p)))).join('\n');
       if (parts.trim()) return parts;
     }
-    // older shapes: candidates[0].output or candidates[0].message etc.
     if (cand.output && Array.isArray(cand.output)) {
       const out = cand.output.map(o => (o.text || JSON.stringify(o))).join('\n');
       if (out.trim()) return out;
     }
     if (cand.message && cand.message.content) {
-      // message.content might be an array or string
       if (typeof cand.message.content === 'string') return cand.message.content;
       if (Array.isArray(cand.message.content)) {
         return cand.message.content.map(c => (c.text || JSON.stringify(c))).join('\n');
@@ -94,13 +88,11 @@ async function callGemini(prompt, opts = {}) {
     }
   }
 
-  // 3) json.output (array) with content blocks
   if (json && Array.isArray(json.output) && json.output[0] && Array.isArray(json.output[0].content)) {
     const outParts = json.output[0].content.map(p => p.text || JSON.stringify(p)).join('\n');
     if (outParts.trim()) return outParts;
   }
 
-  // 4) fallback: stringify whole response
   return JSON.stringify(json);
 }
 
@@ -186,7 +178,7 @@ async function saveMarkdownAsPdf(markdownText, outPdfPath, title = 'Tailored Res
     const resumeText = await extractTextFromDocx(absResume);
     console.log(`Extracted resume text length: ${resumeText.length}`);
 
-    // 1) Tailor
+    // Stage 1: Tailor
     console.log('Calling Gemini to tailor resume...');
     const tailorPrompt = buildTailorPrompt(resumeText, jobTitle, jobDesc);
     const tailored = await callGemini(tailorPrompt, { temperature: 0.2, maxOutputTokens: 4096 });
@@ -194,11 +186,10 @@ async function saveMarkdownAsPdf(markdownText, outPdfPath, title = 'Tailored Res
     fs.writeFileSync('./output/tailored_resume_stage1.md', tailored, 'utf8');
     console.log('Stage 1 tailored resume saved.');
 
-    // 2) Recruiter review
+    // Stage 2: Recruiter review
     console.log('Calling Gemini to role-play recruiter and identify gaps...');
     const reviewPrompt = buildRecruiterReviewPrompt(tailored, company, jobTitle, jobDesc);
     const gapsRaw = await callGemini(reviewPrompt, { temperature: 0.1, maxOutputTokens: 1024 });
-    // Try to extract JSON body if present
     let gapsJson = gapsRaw;
     try {
       const m = gapsRaw.match(/\{[\s\S]*\}/);
@@ -211,13 +202,13 @@ async function saveMarkdownAsPdf(markdownText, outPdfPath, title = 'Tailored Res
     fs.writeFileSync('./output/recruiter_gaps.json.txt', gapsJson, 'utf8');
     console.log('Recruiter gaps saved.');
 
-    // 3) Fix gaps
+    // Stage 3: Fix gaps and finalize
     console.log('Calling Gemini to fix gaps and produce final resume...');
     const fixPrompt = buildFixPrompt(tailored, gapsJson);
     const fixedResume = await callGemini(fixPrompt, { temperature: 0.15, maxOutputTokens: 4096 });
     fs.writeFileSync('./output/tailored_resume_final.md', fixedResume, 'utf8');
 
-    // 4) Render PDF
+    // Stage 4: Render PDF
     const outPdf = path.join(process.cwd(), 'output', 'tailored_resume_final.pdf');
     console.log('Rendering PDF to', outPdf);
     await saveMarkdownAsPdf(fixedResume, outPdf, `${jobTitle} - Tailored Resume`);
@@ -226,8 +217,7 @@ async function saveMarkdownAsPdf(markdownText, outPdfPath, title = 'Tailored Res
     process.exit(0);
   } catch (err) {
     console.error('ERROR:', err && err.message ? err.message : err);
-    // write full error to file for debugging
-    try { fs.writeFileSync('./output/error.txt', String(err)); } catch (e) {}
+    try { if (!fs.existsSync('./output')) fs.mkdirSync('./output'); fs.writeFileSync('./output/error.txt', String(err)); } catch (e) {}
     process.exit(10);
   }
 })();
