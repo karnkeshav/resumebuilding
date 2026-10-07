@@ -13,3 +13,6 @@ Secrets required in GitHub repo Settings → Actions → Secrets:
 - GITHUB_TOKEN (provided automatically in Actions)
 
 Run locally: `npm ci` then `npm start` (Playwright browsers require `npx playwright install`).
+
+
+<!-- Security scan triggered at 2026-10-07 11:39:36 -->
